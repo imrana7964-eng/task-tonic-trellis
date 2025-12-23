@@ -12,6 +12,8 @@ import {
   Trash2,
   Shuffle
 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface Flashcard {
   id: number;
@@ -48,6 +50,7 @@ export default function Flashcards() {
   const [isFlipped, setIsFlipped] = useState(false);
   const [notes, setNotes] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const { toast } = useToast();
 
   const currentCard = cards[currentIndex];
 
@@ -72,29 +75,48 @@ export default function Flashcards() {
     setIsFlipped(false);
   };
 
-  const generateCards = () => {
+  const generateCards = async () => {
     if (!notes.trim()) return;
     
     setIsGenerating(true);
     
-    // Simulate AI generation
-    setTimeout(() => {
-      const newCards: Flashcard[] = [
-        {
-          id: Date.now(),
-          front: "Generated Question 1",
-          back: "This would be an AI-generated answer based on your notes!",
-        },
-        {
-          id: Date.now() + 1,
-          front: "Generated Question 2",
-          back: "Another insightful answer from your study material.",
-        },
-      ];
-      setCards((prev) => [...prev, ...newCards]);
-      setNotes("");
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-flashcards", {
+        body: { notes: notes.trim() }
+      });
+
+      if (error) {
+        throw new Error(error.message || "Failed to generate flashcards");
+      }
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      if (data.flashcards && Array.isArray(data.flashcards)) {
+        const newCards: Flashcard[] = data.flashcards.map((card: { front: string; back: string }, index: number) => ({
+          id: Date.now() + index,
+          front: card.front,
+          back: card.back,
+        }));
+        
+        setCards((prev) => [...prev, ...newCards]);
+        setNotes("");
+        toast({
+          title: "Flashcards Generated! 🎉",
+          description: `Created ${newCards.length} new flashcards from your notes.`,
+        });
+      }
+    } catch (error) {
+      console.error("Error generating flashcards:", error);
+      toast({
+        title: "Generation Failed",
+        description: error instanceof Error ? error.message : "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
       setIsGenerating(false);
-    }, 1500);
+    }
   };
 
   const deleteCard = (id: number) => {
@@ -133,7 +155,9 @@ export default function Flashcards() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <Textarea
-                  placeholder="Paste your notes here... The AI will extract key concepts and create flashcards for you!"
+                  placeholder="Paste your notes here... The AI will extract key concepts and create flashcards for you!
+
+Example: 'The mitochondria is the powerhouse of the cell. It produces ATP through cellular respiration. The process involves glycolysis, the Krebs cycle, and oxidative phosphorylation.'"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="min-h-[200px]"
@@ -147,7 +171,7 @@ export default function Flashcards() {
                   {isGenerating ? (
                     <>
                       <div className="w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin" />
-                      Generating...
+                      Generating with AI...
                     </>
                   ) : (
                     <>
